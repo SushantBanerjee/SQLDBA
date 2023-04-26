@@ -1,0 +1,17 @@
+select t.publisher_database_id, t.xact_seqno, max(t.entry_time) as EntryTime, count(c.xact_seqno) as CommandCount into #Results FROM MSrepl_commands c with (nolock) 
+LEFT JOIN MSrepl_transactions t with (nolock) on t.publisher_database_id = c.publisher_database_id and t.xact_seqno = c.xact_seqno 
+WHERE entry_time between '2020-10-27 15:30:00.000' AND '2020-10-27 22:00:00.000'
+GROUP BY t.publisher_database_id, t.xact_seqno 
+
+SELECT MPD.publisher_db ,datepart(year, R.EntryTime) as Year ,datepart(month, R.EntryTime) as Month ,datepart(day, R.EntryTime) as Day ,datepart(hh, R.EntryTime) as Hour 
+	,sum(R.CommandCount) as CommandCountPerTimeUnit 
+FROM #Results R 
+	inner join MSpublisher_databases MPD on R.publisher_database_id = MPD.id
+GROUP BY MPD.publisher_db ,datepart(year, R.EntryTime) ,datepart(month, R.EntryTime) ,datepart(day, R.EntryTime) ,datepart(hh, R.EntryTime) 
+ORDER BY MPD.publisher_db, 3, 4, 5
+
+
+--if exists (select name from tempdb.sys.objects where name like '#Results%') 
+--begin 
+--Drop table #Results 
+--end

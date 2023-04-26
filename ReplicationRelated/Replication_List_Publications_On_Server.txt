@@ -1,0 +1,181 @@
+USE Distribution
+GO
+SELECT DISTINCT  
+srv.srvname publication_server  
+, a.publisher_db 
+, p.publication publication_name 
+, a.article 
+, a.destination_object 
+, ss.srvname subscription_server 
+, s.subscriber_db 
+--, da.name AS distribution_agent_job_name 
+FROM MSArticles a  
+JOIN MSpublications p ON a.publication_id = p.publication_id 
+JOIN MSsubscriptions s ON p.publication_id = s.publication_id 
+JOIN master..sysservers ss ON s.subscriber_id = ss.srvid 
+JOIN master..sysservers srv ON srv.srvid = p.publisher_id 
+JOIN MSdistribution_agents da ON da.publisher_id = p.publisher_id  
+     AND da.subscriber_id = s.subscriber_id 
+ORDER BY 1,2,3  
+
+
+use NCDX
+select db_name() AS Database_Name, name, dest_table,  ins_cmd, upd_cmd, del_cmd, filter_clause from [dbo].[sysarticles]
+
+
+
+
+-- Run the below commands on your publisher database for your publication to make the changes.
+
+To only create a snapshot for the new articles, 
+we need to disable the publication options; 'immediate_sync' and 'allow_anonymous'. 
+You can get more details by running sp_helppublication on the publisher database.
+
+
+select * from syspublications
+
+sp_helpsubscription <publication_name>
+
+
+--Run on your publisher database
+EXEC sp_changepublication 
+@publication = 'your publication name', 
+@property = 'allow_anonymous' , 
+@value = 'false' 
+GO 
+EXEC sp_changepublication 
+@publication = 'your publication name', 
+@property = 'immediate_sync' , 
+@value = 'false' 
+GO 
+
+
+====================================================
+
+To Check for undistributed commands; run on distribution database
+
+SELECT distinct
+    da.name
+   , da.publication
+   --, ma.article
+   , DS.UndelivCmdsInDistDB
+   , DS.DelivCmdsInDistDB
+FROM dbo.MSdistribution_status DS WITH (NOLOCK)
+   INNER JOIN dbo.MSdistribution_agents da WITH (NOLOCK) ON da.id = DS.agent_id
+   INNER JOIN dbo.MSarticles ma WITH (NOLOCK) ON ma.publisher_id = da.publisher_id and ma.article_id = DS.article_id
+WHERE DS.UndelivCmdsInDistDB > 0
+ORDER BY   
+      UndelivCmdsInDistDB DESC
+      ,publication  
+
+ 
+
+======================================================
+
+SQL Server includes stored procedure sp_scriptpublicationcustomprocs to re-generate new set of subscriber 
+stored procedures.  You execute this first on the Publisher, then take the OUTPUT AS TEXT, and execute it on the 
+Subscriber.  
+Make sure you increate the TEXT COLUMN WIDTH to about 5000 in the Query Properties window or the code will get 
+truncated at the default 256 characters.  Yeah, I found that one out the hard way.  
+Thankfully, the code automatically includes all DROP then CREATEs SPs needed by the Subscriber.
+
+sp_scriptpublicationcustomprocs  '<publication>'
+Root Cause?
+
+Since the bitmap column was missing it looked like the SPs were written for SQL 2000 subscriber.  
+May have been caused by a database_compatibility_level setting.  
+Not sure as we never found root cause just the solution.
+
+======================================================
+
+To Check for undistributed commands; run on distribution database
+
+
+ SELECT 
+   SUBSTRING(mda.name, 0,CHARINDEX('-', mda.name)) AS Publisher_Server,
+   subscriber_name = case when mda.anonymous_subid is not null then   
+                    upper(mda.subscriber_name) else upper(srv.name) end,   
+ publisher_db = mda.publisher_db,   
+ publication = mda.publication,  
+ subscription_type =  CASE WHEN mda.subscription_type =  '0' THEN 'Push'  
+       WHEN mda.subscription_type =  '1' THEN 'Pull'  
+       WHEN mda.subscription_type =  '2' THEN 'Anonymous'  END ,  
+    runstatus = CASE   
+        WHEN mdh.runstatus = '1' THEN 'Start'  
+        WHEN mdh.runstatus = '2' THEN 'Succeed'  
+        WHEN mdh.runstatus = '3' THEN 'InProgress'  
+        WHEN mdh.runstatus = '4' THEN 'Idle'  
+        WHEN mdh.runstatus = '5' THEN 'Retry'  
+        WHEN mdh.runstatus = '6' THEN 'Fail'  
+        WHEN mdh.runstatus = '0' AND mda.subscription_type = '0' THEN 'PushPublication'  
+       END,   
+ mdhtime = CONVERT(VARCHAR(25),mdh.[time]),   
+ UndelivCmdsInDistDB = ISNULL(und.UndelivCmdsInDistDB,0),   
+ Current_Delivery_Rate = cast(current_delivery_rate as money) ,   
+ Current_Delivery_latency = current_delivery_latency,   
+ delivery_rate = cast(delivery_rate as money),   
+ delivery_latency = delivery_latency ,  
+ SourceCount = cast('' as bigint),   
+ DestinationCount = cast('' as bigint),  
+ comment=mdh.comments  
+   FROM distribution.dbo.MSdistribution_agents  mda with (nolock)  
+   JOIN distribution.dbo.MSdistribution_history  mdh with (nolock) ON mdh.agent_id = mda.id  
+   JOIN (SELECT MAX(time) MaxTimeValue, a.name  
+       FROM distribution.dbo.MSdistribution_agents a  
+       JOIN distribution.dbo.MSdistribution_history h ON h.agent_id=a.id  
+    where   subscriber_id > 0 GROUP BY name  
+    ) x ON x.MaxTimeValue = mdh.time AND x.name = mda.name  
+   LEFT OUTER JOIN (SELECT st.agent_id, SUM(st.UndelivCmdsInDistDB) AS UndelivCmdsInDistDB  
+           FROM distribution.dbo.MSdistribution_status st  
+           GROUP BY st.agent_id   
+       ) und ON mda.id = und.agent_id  
+   join sys.servers as srv  
+                on srv.server_id = mda.subscriber_id   
+  WHERE mda.subscriber_id > 0   
+   order by (case when mda.anonymous_subid is not null then   
+                    upper(mda.subscriber_name)   
+                else  
+                    upper(srv.name)  
+                end)  
+
+
+
+
+======================================================
+
+
+
+-- TO FIND FILTER IN REPLICATION
+
+Declare @databases varchar (100), @query varchar(max)
+
+Declare CurDatabases Cursor for select name from sys.databases where state_desc='ONLINE' and database_id > 4 and name not in ('ReportServer','ReportServerTempDB') and is_published=1
+
+Open CurDatabases 
+
+fetch next from CurDatabases into @databases
+
+while (@@FETCH_STATUS=0)
+
+Begin
+
+
+Set  @query= 'Use ['+@databases+'] 
+
+select db_name() AS Database_Name, name, dest_table,  ins_cmd, upd_cmd, del_cmd, filter_clause from [dbo].[sysarticles]
+
+
+'
+exec(@Query)
+
+
+
+fetch next from CurDatabases into @databases
+ENd
+
+Close CurDatabases
+Deallocate CurDatabases
+
+
+
+

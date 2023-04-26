@@ -1,0 +1,113 @@
+USE [msdb]
+GO
+
+/****** Object:  Job [DBA_Replication_Latency_Monitor]    Script Date: 26-04-2023 12:11:11 ******/
+BEGIN TRANSACTION
+DECLARE @ReturnCode INT
+SELECT @ReturnCode = 0
+/****** Object:  JobCategory [[Uncategorized (Local)]]    Script Date: 26-04-2023 12:11:12 ******/
+IF NOT EXISTS (SELECT name FROM msdb.dbo.syscategories WHERE name=N'[Uncategorized (Local)]' AND category_class=1)
+BEGIN
+EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'[Uncategorized (Local)]'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+
+END
+
+DECLARE @jobId BINARY(16)
+EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'DBA_Replication_Latency_Monitor', 
+		@enabled=0, 
+		@notify_level_eventlog=0, 
+		@notify_level_email=0, 
+		@notify_level_netsend=0, 
+		@notify_level_page=0, 
+		@delete_level=0, 
+		@description=N'Replication Latency Monitoring', 
+		@category_name=N'[Uncategorized (Local)]', 
+		@owner_login_name=N'LinkAdmin', @job_id = @jobId OUTPUT
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Step 1]    Script Date: 26-04-2023 12:11:12 ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Step 1', 
+		@step_id=1, 
+		@cmdexec_success_code=0, 
+		@on_success_action=3, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'EXEC Replication_Get_PendingCMDCount', 
+		@database_name=N'DBA_Admin', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+/****** Object:  Step [Step 2]    Script Date: 26-04-2023 12:11:12 ******/
+EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Step 2', 
+		@step_id=2, 
+		@cmdexec_success_code=0, 
+		@on_success_action=1, 
+		@on_success_step_id=0, 
+		@on_fail_action=2, 
+		@on_fail_step_id=0, 
+		@retry_attempts=0, 
+		@retry_interval=0, 
+		@os_run_priority=0, @subsystem=N'TSQL', 
+		@command=N'If Exists (Select 1 from [dbo].[LOG_TRANSACTIONAL_REPLICATION_UNDISTRIBUTED_COMMANDS] where EstimatedProcessTime_sec >= 300)
+Begin
+
+declare @profile_name varchar(100)
+declare @recipients varchar(100)
+declare @copy_recipients varchar(100)
+declare @subject varchar(100)
+declare  @body_format varchar(100)
+DECLARE @xml NVARCHAR(MAX)
+DECLARE @body NVARCHAR(MAX)
+
+SET @xml = CAST(( SELECT [PublisherDB] AS ''td'','''',[Publication] AS ''td'','''', [Subscriber] AS ''td'','''', PendingCMDCount AS ''td'', '''' , EstimatedProcessTime_Sec AS ''td''
+FROM [dbo].[LOG_TRANSACTIONAL_REPLICATION_UNDISTRIBUTED_COMMANDS] where EstimatedProcessTime_sec >= 300 
+FOR XML PATH(''tr''), ELEMENTS ) AS NVARCHAR(MAX))
+
+SET @body =''<html><body><H3>Replication Latency Alert on 172.31.15.250</H3>
+<table border = 1> 
+<tr>
+<th> PubliserDB </th> <th> Publication </th> <th> Subscriber </th> <th> PendingCMDCount </th>  <th> EstimatedProcessTime_Sec </th> </tr>'' 
+SET @body = @body + @xml +''</table></body></html>''
+
+
+EXEC msdb.dbo.sp_send_dbmail 
+	@profile_name=''DBA'',    
+        @recipients=''bi.dba@angelbroking.com;'', 
+        @subject = ''*** URGENT - REPLICATION LATENCY on Distributor 172.31.26.109  is beyond 5 Minutes'',
+        @body=@body,                  
+        @body_format = ''HTML''
+
+End
+
+', 
+		@database_name=N'DBA_Admin', 
+		@flags=0
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_update_job @job_id = @jobId, @start_step_id = 1
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobschedule @job_id=@jobId, @name=N'Schedule 1', 
+		@enabled=1, 
+		@freq_type=4, 
+		@freq_interval=1, 
+		@freq_subday_type=4, 
+		@freq_subday_interval=10, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=0, 
+		@active_start_date=20230120, 
+		@active_end_date=99991231, 
+		@active_start_time=0, 
+		@active_end_time=235959, 
+		@schedule_uid=N'c297fd3b-ca0d-4f35-9838-475f7460ad28'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+EXEC @ReturnCode = msdb.dbo.sp_add_jobserver @job_id = @jobId, @server_name = N'(local)'
+IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
+COMMIT TRANSACTION
+GOTO EndSave
+QuitWithRollback:
+    IF (@@TRANCOUNT > 0) ROLLBACK TRANSACTION
+EndSave:
+GO
+

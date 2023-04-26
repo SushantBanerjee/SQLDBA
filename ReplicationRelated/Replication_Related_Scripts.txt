@@ -1,0 +1,156 @@
+Run the following script on 172.31.16.105 AND 172.31.16.106
+Database: LiveFeed
+SP to Run: EXEC USP_Check_Intra_LTP_Data_NoMail
+
+Compare data in 172.31.16.85
+Database: LiveFeed
+SP to Run: EXEC USP_Check_Intra_LTP_Data_NoMail
+
+**************************************************************************************
+
+
+-- Returns current status information for the Publisher, to be executed at Distributer
+
+sp_replmonitorhelppublisher 
+
+sp_replmonitorhelpsubscription @publication_type=0
+
+/*
+******** TO CHECK UNDISTRIBUTED COMMANDS
+*/
+
+On 172.31.16.85
+
+sp_replmonitorsubscriptionpendingcmds @publisher='ABETLREPDBHA', @Publisher_DB='LiveFeed', 
+	@Publication='16_85_To_16_105_And_16_106_LiveFeed_1', @Subscriber='LIVEFEED', @subscriber_db='LiveFeed', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+sp_replmonitorsubscriptionpendingcmds @publisher='ABETLREPDBHA', @Publisher_DB='LiveFeed', 
+	@Publication='16_85_To_16_105_And_16_106_LiveFeed_1', @Subscriber='LIVEFEED1', @subscriber_db='LiveFeed', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+sp_replmonitorsubscriptionpendingcmds @publisher='ABETLREPDBHA', @Publisher_DB='LiveFeed', 
+	@Publication='16_85_To_16_105_And_16_106_LiveFeed_1', @Subscriber='LIVEFEED2', @subscriber_db='LiveFeed', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+
+--------------------------------
+
+On 172.31.15.37  (parallel server where feeds come is 172.31.15.192)
+------------------
+sp_replmonitorsubscriptionpendingcmds @publisher='ABRILFEED37', @publisher_db='INTEGRATED_ODIN', 
+	@publication='INTEGRATED_ODIN_15_37', @subscriber='ABETLREPDBHA', @subscriber_db='ODINFEED', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+sp_replmonitorsubscriptionpendingcmds @publisher='ABRILFEED37', @publisher_db='INTEGRATED_ODIN', 
+	@publication='INTEGRATED_ODIN_15_37', @subscriber='LIVEFEED2', @subscriber_db='ODINFEED', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+
+sp_replmonitorsubscriptionpendingcmds @publisher='ABRILFEED37', @publisher_db='ODINFEED', 
+	@publication='ODINFEED_15_37', @subscriber='ABETLREPDBHA', @subscriber_db='ODINFEED', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+sp_replmonitorsubscriptionpendingcmds @publisher='ABRILFEED37', @publisher_db='ODINFEED', 
+	@publication='ODINFEED_15_37', @subscriber='LIVEFEED2', @subscriber_db='ODINFEED', @subscription_type='0' -- 0=Push, 1=Pull
+GO
+
+---------------------------------------------------------------
+http://www.techdevops.com/Article.aspx?CID=106
+
+
+-- ***************************
+
+
+
+--  ********** To Monitor Delivery Latency
+select top 1 * from sys.dm_os_performance_counters where object_name like '%Replica%' 
+and counter_name like '%Logreader:%latency%' --and cntr_value > @threshold
+union
+select top 1 * from sys.dm_os_performance_counters where object_name like '%Replica%' 
+and counter_name like '%Dist%latency%' --and cntr_value > @threshold
+
+-- ********** To check if Agents are Running
+declare @time time
+declare @date date
+
+set @time = dateadd(n,-30,getdate())  -- Here I am setting to trace back only past 30 minutes
+set @date = convert(date,getdate())   -- The job failure trace back is defined on current day
+
+select distinct TOP 100 b.name,a.run_date, a.run_time,message from msdb..sysjobhistory a 
+	inner join msdb..sysjobs b on a.job_id = b.job_id
+where b.name like 'ABETLREPDBHA%' and run_status <> 1 and message like '%error%'
+--and convert(date,convert(varchar,a.run_date ))= @date
+--and right('00000'+convert(varchar,a.run_time),6)  > replace(convert(varchar(8),@time),':','') 
+ORDER BY a.run_date DESC, a.run_time DESC
+
+
+
+REP_DATA folder is 663 MB
+
+
+
+============================================================================================================
+The below query is to be run on Subscriber database 
+This gives the details of Jobs for PULL SUBSCRIPTION,
+
+select job.name as JobName,distribution_agent as AgentName, * From MSreplication_subscriptions s 
+inner join msdb.dbo.sysjobs job on s.agent_id=job.job_id
+
+============================================================================================================
+
+
+-- Run the following command at the publisher to deactivate the @dbname as a publisher
+sp_replicationdboption @dbname= 'ReplicatedData', @optname= 'publish', @value= 'False' 
+
+
+--ALTER DATABASE REPLICATEDDATA SET EMERGENCY
+--ALTER DATABASE REPLICATEDDATA SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+--DBCC CHECKDB ('REPLICATEDDATA', REPAIR_ALLOW_DATA_LOSS);
+--ALTER DATABASE REPLICATEDDATA SET MULTI_USER;
+
+
+
+sp_replcounters
+
+
+
+============================================================================================================
+Error: Cannot insert explicit value for identity column in table 'Multibankid' when IDENTITY_INSERT is set to OFF. 
+       (Source: MSSQLServer, Error number: 544)
+
+Reason: The [Not For Replication] column is set to 0 (Zero) when we use sp_help <tablename>
+
+Solution:
+On the subscriber database run the following
+
+DECLARE @ApplicableObjectID INT
+SET @ApplicableObjectID = OBJECT_ID('Multibankid')
+select @ApplicableObjectID
+
+EXEC sp_identitycolumnforreplication 251147940,1	< the number 251147940 is obtained from the variable @ApplicableObjectID >
+
+============================================================================================================
+
+https://github.com/MicrosoftDocs/sql-docs/blob/live/docs/relational-databases/replication/monitor/programmatically-monitor-replication.md
+https://docs.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-replmonitorhelppublisher-transact-sql?view=sql-server-ver15
+
+exec sp_replmonitorhelppublisher  -- Status : 1 = Started  2 = Succeeded 3 = In progress 4 = Idle 5 = Retrying 6 = Failed
+
+exec sp_replmonitorhelppublication @publisher='ANAND1\ANAND1'
+
+exec sp_replmonitorhelpsubscription @publisher='ANAND1\ANAND1', @publication_type=0
+
+exec sp_replmonitorsubscriptionpendingcmds @publisher='ANAND1\ANAND1', @publisher_db='ACCOUNT', @publication='Ledger1', @subscriber='MIMANSASTMT', 
+@subscriber_db='ReplicatedData', @subscription_type=0
+
+select top 100 * from MSdistribution_history where agent_id=383 order by time desc  -- (383 is from distributionagentid field from sp sp_replmonitorhelpsubscription)
+
+
+
+============================================================================================================
+
+
+============================================================================================================
+
+
+============================================================================================================
+
+
+============================================================================================================
+
+

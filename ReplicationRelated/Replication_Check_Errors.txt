@@ -1,0 +1,52 @@
+ SELECT 
+   SUBSTRING(mda.name, 0,CHARINDEX('-', mda.name)) AS Publisher_Server,
+   subscriber_name = case when mda.anonymous_subid is not null then   
+                    upper(mda.subscriber_name) else upper(srv.name) end,   
+ publisher_db = mda.publisher_db,   
+ publication = mda.publication,  
+ subscription_type =  CASE WHEN mda.subscription_type =  '0' THEN 'Push'  
+       WHEN mda.subscription_type =  '1' THEN 'Pull'  
+       WHEN mda.subscription_type =  '2' THEN 'Anonymous'  END ,  
+    runstatus = CASE   
+        WHEN mdh.runstatus = '1' THEN 'Start'  
+        WHEN mdh.runstatus = '2' THEN 'Succeed'  
+        WHEN mdh.runstatus = '3' THEN 'InProgress'  
+        WHEN mdh.runstatus = '4' THEN 'Idle'  
+        WHEN mdh.runstatus = '5' THEN 'Retry'  
+        WHEN mdh.runstatus = '6' THEN 'Fail'  
+        WHEN mdh.runstatus = '0' AND mda.subscription_type = '0' THEN 'PushPublication'  
+       END,   
+ mdhtime = CONVERT(VARCHAR(25),mdh.[time]),   
+ UndelivCmdsInDistDB = ISNULL(und.UndelivCmdsInDistDB,0),   
+ --Current_Delivery_Rate = cast(current_delivery_rate as money) ,   
+ --Current_Delivery_latency = current_delivery_latency,   
+ --delivery_rate = cast(delivery_rate as money),   
+ --delivery_latency = delivery_latency ,  
+ --SourceCount = cast('' as bigint),   
+ --DestinationCount = cast('' as bigint),  
+ comment=mdh.comments  
+   FROM distribution.dbo.MSdistribution_agents  mda with (nolock)  
+   JOIN distribution.dbo.MSdistribution_history  mdh with (nolock) ON mdh.agent_id = mda.id  
+   JOIN (SELECT MAX(time) MaxTimeValue, a.name  
+       FROM distribution.dbo.MSdistribution_agents a  
+       JOIN distribution.dbo.MSdistribution_history h ON h.agent_id=a.id  
+    where   subscriber_id > 0 GROUP BY name  
+    ) x ON x.MaxTimeValue = mdh.time AND x.name = mda.name  
+   LEFT OUTER JOIN (SELECT st.agent_id, SUM(st.UndelivCmdsInDistDB) AS UndelivCmdsInDistDB  
+           FROM distribution.dbo.MSdistribution_status st  
+           GROUP BY st.agent_id   
+       ) und ON mda.id = und.agent_id  
+   join sys.servers as srv  
+                on srv.server_id = mda.subscriber_id   
+  WHERE mda.subscriber_id > 0   
+
+  AND (
+     comments NOT LIKE 'No replicated transactions are available.'
+	 AND comments not like '%transaction(s) with % command(s) were delivered.'
+	 AND comments NOT LIKE '************************ STATISTICS SINCE AGENT STARTED ***********************%'
+  )
+   order by (case when mda.anonymous_subid is not null then   
+                    upper(mda.subscriber_name)   
+                else  
+                    upper(srv.name)  
+                end)  
