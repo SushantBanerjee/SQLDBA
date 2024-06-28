@@ -1,0 +1,22 @@
+WITH CTE AS
+(
+SELECT CONVERT(VARCHAR(10), backup_start_date, 121) AS Backup_Start_Date, 
+	--CONVERT(VARCHAR(10), backup_finish_date, 121) AS Backup_Finish_Date, 
+	--SUM((backup_size/1048576)) AS BackupSize_MB 
+	SUM((compressed_backup_size/1048576)) AS Compressed_BackupSize_MB 
+	--, database_name 
+FROM backupset 
+WHERE Type='L'
+GROUP BY CONVERT(VARCHAR(10), backup_start_date, 121)--, type, database_name
+--ORDER BY 1
+)
+
+--select DATEPART(WEEK, Backup_Start_Date) AS WeekNumber, AVG(BackupSize_MB) AS AvgBackupSize_In_Week_MB
+--FROM cte 
+--GROUP BY DATEPART(WEEK, Backup_Start_Date)
+--order by 1
+
+select Backup_Start_Date, Compressed_BackupSize_MB, (Compressed_BackupSize_MB/1024) AS Compressed_BackupSize_GB  
+FROM cte 
+order by 1
+

@@ -1,0 +1,110 @@
+SELECT r.session_id,r.command,CONVERT(NUMERIC(6,2),r.percent_complete)
+AS [Percent Complete],CONVERT(VARCHAR(20),DATEADD(ms,r.estimated_completion_time,GetDate()),20) AS [ETA Completion Time],
+CONVERT(NUMERIC(10,2),r.total_elapsed_time/1000.0/60.0) AS [Elapsed Min],
+CONVERT(NUMERIC(10,2),r.estimated_completion_time/1000.0/60.0) AS [ETA Min],
+CONVERT(NUMERIC(10,2),r.estimated_completion_time/1000.0/60.0/60.0) AS [ETA Hours],
+CONVERT(VARCHAR(1000),(SELECT SUBSTRING(text,r.statement_start_offset/2,
+CASE WHEN r.statement_end_offset = -1 THEN 1000 ELSE (r.statement_end_offset-r.statement_start_offset)/2 END)
+FROM sys.dm_exec_sql_text(sql_handle))) AS [SQL]
+FROM sys.dm_exec_requests r WHERE command IN ('RESTORE DATABASE','BACKUP DATABASE', 'BACKUP LOG', 'RESTORE LOG')
+
+
+-----------------------------------------------------------------------------------------------
+
+EXEC sp_readerrorlog 0, 1, 'BACKUP failed'; -- current
+EXEC sp_readerrorlog 1, 1, 'BACKUP failed'; -- .1 (previous)
+EXEC sp_readerrorlog 2, 1, 'BACKUP failed'; -- .2 (the one before that)
+
+-----------------------------------------------------------------------------------------------
+
+SELECT 
+    --[sJOB].[job_id] AS [JobID]
+	[sJOBH].run_status,
+	CASE [sJOBH].[run_status]
+        WHEN 0 THEN 'Failed'
+        WHEN 1 THEN 'Succeeded'
+        WHEN 2 THEN 'Retry'
+        WHEN 3 THEN 'Canceled'
+        WHEN 4 THEN 'Running' -- In Progress
+      END AS [LastRunStatus]
+
+    , [sJOB].[name] AS [JobName]
+    , [sCAT].[name] AS [JobCategory]
+    , CASE [sJOB].[enabled]
+        WHEN 1 THEN 'Yes'
+        WHEN 0 THEN 'No'
+      END AS [IsEnabled]
+FROM
+    [msdb].[dbo].[sysjobs] AS [sJOB]
+    LEFT JOIN [msdb].[dbo].[syscategories] AS [sCAT] ON [sJOB].[category_id] = [sCAT].[category_id]
+	LEFT JOIN (
+                SELECT 
+                    [job_id]
+                    , [run_date]
+                    , [run_time]
+                    , [run_status]
+                    , [run_duration]
+                    , [message]
+                    , ROW_NUMBER() OVER (
+                                            PARTITION BY [job_id] 
+                                            ORDER BY [run_date] DESC, [run_time] DESC
+                      ) AS RowNumber
+                FROM [msdb].[dbo].[sysjobhistory]
+                WHERE [step_id] = 0
+            ) AS [sJOBH]
+        ON [sJOB].[job_id] = [sJOBH].[job_id]
+        AND [sJOBH].[RowNumber] = 1
+
+WHERE [sCAT].[name] = 'Database Maintenance' AND sJOB.Name LIKE '%backup%'
+ORDER BY [JobName]
+
+-------------------------------------------------------------------------------------------------------
+
+-- Backup Details
+
+select 
+convert(varchar(30), (datediff(mi, MIN(backup_start_date), MAX(backup_finish_date)) / 60)) 
++ ' hrs ' + 
+convert(varchar(30), (datediff(mi, MIN(backup_start_date), MAX(backup_finish_date)) % 60)) + ' mins' AS [Time_Taken],
+convert(decimal(18,2),(sum(Compressed_backup_size))/1024/1024/1024) as [Backup_SizeinGB],
+COUNT(*) AS [No_Of_Databases],
+MIN(backup_start_date) AS [Backup_Start], MAX(backup_finish_date) AS [Backup_End]
+from msdb.dbo.backupset 
+WHERE backup_start_date >= '2021-01-09 19:00:00.000' and type='D'
+and name not like 'commvault%'
+group by server_name
+
+
+
+-------------------------------------------------------------------------------------------------------
+
+-- Get Directory details (Backup files)
+
+declare @files table (ID int IDENTITY, FileName varchar(200))
+insert into @files execute xp_cmdshell 'dir R:\FULL_Backup\*.bak'
+select Left(FileName,17) AS File_Date, 
+RTRIM(LTRIM(SUBSTRING(FileName, 18,18))) AS File_Size_Dir, 
+CAST(REPLACE(RTRIM(LTRIM(SUBSTRING(FileName, 18,18))), ',', '') AS bigint) / 1048576 AS File_Size_MB, 
+CAST(REPLACE(RTRIM(LTRIM(SUBSTRING(FileName, 18,18))), ',', '') AS BigInt) / 1073741824 AS File_Size_GB, 
+CAST(CAST(REPLACE(RTRIM(LTRIM(SUBSTRING(FileName, 18,18))), ',', '') AS DECIMAL(25,2)) / 1073741824 AS DECIMAL(7,3)) AS File_Size_GB_1, 
+RTRIM(LTRIM(SUBSTRING(FileName, 36,80))) AS File_Name_1
+,* 
+from @files WHERE IsNumeric(Left(FileName,1)) = 1
+ORDER BY File_Name_1
+
+
+-------------------------------------------------------------------------------------------------------
+
+-- Path where backup file is present
+
+SELECT BUS.Backup_Start_Date, BUS.Backup_Finish_Date, BUS.Database_Name, BUS.Compressed_backup_size/1024/1024/1024 as [Backup_SizeinGB],
+	BMF.physical_device_name, BUS.type
+FROM msdb.dbo.backupset BUS
+	INNER JOIN msdb.dbo.backupmediafamily BMF ON BUS.Media_Set_ID = BMF.Media_Set_ID
+WHERE BUS.backup_start_date >= '2022-04-01 19:00:00.000' and type='D'
+ORDER BY BUS.backup_start_date
+
+
+
+
+https://www.mssqltips.com/sqlservertip/4164/ssrs-report-for-sql-server-database-backup-status/

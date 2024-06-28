@@ -1,0 +1,91 @@
+DECLARE @MaxDays_Since_Last_Full_Backup INT
+DECLARE @MaxDays_Since_Last_Diff_Backup INT
+
+DECLARE @LAST_FULL_BACKUP_LIST TABLE
+(
+	Database_Name							VARCHAR(100),
+	Last_Full_Backup_Finish_DateTime		DATETIME,
+	Backup_Type								VARCHAR(1) DEFAULT 'D',
+	FullBackup_SetID						INT
+)
+
+DECLARE @LAST_DIFF_BACKUP_LIST TABLE
+(
+	Database_Name							VARCHAR(100),
+	Last_Diff_Backup_Finish_DateTime		DATETIME,
+	Backup_Type								VARCHAR(1) DEFAULT 'I',
+	DiffBackup_SetID						INT
+)
+
+DECLARE @Backup_Report TABLE
+(
+	Server_Name						VARCHAR(100),
+	Server_IP						VARCHAR(20),
+	Database_Name					VARCHAR(100),
+	FullBackup_SetID				INT DEFAULT 0,
+	DiffBackup_SetID				INT DEFAULT 0,
+	Last_Full_Backup_Start			DATETIME,
+	Last_Full_Backup_End			DATETIME,
+	Days_Since_Last_Full_Backup		INT,
+	Last_Full_Backup_Size_GB		DECIMAL(19,3),
+	Last_Diff_Backup_Start			DATETIME,
+	Last_Diff_Backup_End			DATETIME,
+	Days_Since_Last_Diff_Backup		INT,
+	Last_Diff_Backup_Size_GB		DECIMAL(19,3)
+)
+
+INSERT INTO @LAST_FULL_BACKUP_LIST (Database_Name, Last_Full_Backup_Finish_DateTime, FullBackup_SetID)
+SELECT SYSDBLIST.name,
+	MAX(BUSETS.backup_finish_date) AS Last_Backup_Finish_DateTime
+	, MAX(backup_set_id)
+FROM MASTER.sys.databases AS SYSDBLIST
+	LEFT OUTER JOIN msdb.dbo.backupset AS BUSETS ON SYSDBLIST.name = BUSETS.database_name
+WHERE SYSDBLIST.name<>'TempDB' AND BUSETS.[type] ='D'
+GROUP BY SYSDBLIST.name
+
+
+INSERT INTO @LAST_DIFF_BACKUP_LIST (Database_Name, Last_Diff_Backup_Finish_DateTime, DiffBackup_SetID)
+SELECT SYSDBLIST.name,
+	MAX(BUSETS.backup_finish_date) AS Last_Backup_Finish_DateTime
+	, MAX(backup_set_id)
+FROM MASTER.sys.databases AS SYSDBLIST
+	LEFT OUTER JOIN msdb.dbo.backupset AS BUSETS ON SYSDBLIST.name = BUSETS.database_name
+WHERE SYSDBLIST.name<>'TempDB' AND BUSETS.[type] ='I'  
+GROUP BY SYSDBLIST.name
+
+
+INSERT INTO @Backup_Report (Server_Name, Server_IP, Database_Name)
+SELECT @@SERVERNAME, CONVERT(VARCHAR(25), CONNECTIONPROPERTY('local_net_address')), Name 
+FROM MASTER.sys.databases WHERE state_desc = 'ONLINE' AND Name <> 'TempDB'
+
+UPDATE BRpt SET FullBackup_SetID = ISNULL(FBkp.FullBackup_SetID, 0), DiffBackup_SetID = ISNULL(DBkp.DiffBackup_SetID,0)
+FROM @Backup_Report BRpt
+	LEFT JOIN @LAST_FULL_BACKUP_LIST FBkp ON BRpt.Database_Name = FBkp.Database_Name
+	LEFT JOIN @LAST_DIFF_BACKUP_LIST DBkp ON BRpt.Database_Name = DBkp.Database_Name
+
+
+UPDATE BRpt SET Last_Full_Backup_Start = FullBKPSET.backup_start_date, Last_Full_Backup_End = FullBKPSET.backup_finish_date,
+			Last_Full_Backup_Size_GB = ROUND(((FullBKPSET.Backup_Size/1024)/1024)/1024,3),
+			Last_Diff_Backup_Start = DiffBKPSET.backup_start_date, Last_Diff_Backup_End = DiffBKPSET.backup_finish_date,
+			Last_Diff_Backup_Size_GB = ROUND(((DiffBKPSET.Backup_Size/1024)/1024)/1024,3)
+FROM @Backup_Report BRpt
+	LEFT JOIN msdb.dbo.backupset FullBKPSET ON BRpt.FullBackup_SetID = FullBKPSET.backup_set_id
+	LEFT JOIN msdb.dbo.backupset DiffBKPSET ON BRpt.DiffBackup_SetID = DiffBKPSET.backup_set_id
+
+UPDATE @Backup_Report SET Days_Since_Last_Full_Backup = (DATEDIFF(DAY,Last_Full_Backup_End ,GETDATE())),
+						Days_Since_Last_Diff_Backup = (DATEDIFF(DAY,Last_Diff_Backup_End ,GETDATE()))
+
+--SELECT * FROM @LAST_FULL_BACKUP_LIST
+--SELECT * FROM @LAST_DIFF_BACKUP_LIST
+SELECT * FROM @Backup_Report
+
+
+SELECT @MaxDays_Since_Last_Full_Backup = MAX(Days_Since_Last_Full_Backup) FROM @Backup_Report
+SELECT @MaxDays_Since_Last_Diff_Backup = MAX(Days_Since_Last_Diff_Backup) FROM @Backup_Report WHERE Database_Name NOT IN ('master','model','msdb')
+
+SELECT CONNECTIONPROPERTY('local_net_address') AS Server_IP, @MaxDays_Since_Last_Full_Backup AS Days_Since_Last_Full_Backup, @MaxDays_Since_Last_Diff_Backup AS Days_Since_Last_Diff_Backup
+
+
+--SELECT * FROM  msdb.dbo.backupset WHERE backup_set_id= 8412
+-- msdb.dbo.backupmediafamily
+--SELECT * FROM msdb.dbo.backupmediafamily
