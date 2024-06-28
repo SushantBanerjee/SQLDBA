@@ -1,0 +1,45 @@
+https://learn.microsoft.com/en-us/answers/questions/721981/always-on-restore-database-to-secondary
+
+If the database in secondary node is in not sync in secondary
+
+- check if SQL Service is running on secondary node
+- Check if Sync is Paused, if yes, then Resume it
+
+- if the above 2 donot work, then need to restore FULL + DIFF + LOG backup from primary to secondary
+  - we cannot directly restore on secondary node because it gives below error
+    Error: BACKUP or RESTORE command is not supported on a database mirror or secondary replica
+
+  - to over come this run the following in the secondary node
+    - ALTER DATABASE DMAT SET HADR OFF; 
+   
+  - then restore FULL backup with NORECOVEY and REPLACE command
+    RESTORE DATABASE [DMAT] FROM DISK = N'\\172.31.16.160\f$\Backup\Full_Backup\DMAT_01.bak' 
+    WITH  FILE = 1,  NORECOVERY,  NOUNLOAD,  REPLACE,  STATS = 5
+
+  - Take DIFF backup on PRIMARY
+    BACKUP DATABASE [DMAT] TO DISK = N'F:\Backup\Diff_Backup\DMAT_Diff_01.bak' WITH COMPRESSION, DIFFERENTIAL
+
+  - then restore DIFF backup with NORECOVEY command
+    RESTORE DATABASE [DMAT] FROM DISK = N'\\172.31.16.160\f$\Backup\Diff_Backup\DMAT_01.bak' 
+    WITH  NORECOVERY, STATS = 5
+
+  - Take LOGbackup on PRIMARY
+    BACKUP LOG [DMAT] TO DISK = N'F:\Backup\Log_Backup\DMAT_Log_01.trn'  with COMPRESSION
+
+  - then restore Log backup
+    RESTORE LOG [DMAT] FROM DISK = N'\\172.31.16.160\f$\Backup\Log_Backup\DMAT_01.trn' WITH NORECOVERY
+    Take another log backup on PRIMARY and restore on Secondary
+    RESTORE LOG [DMAT] FROM DISK = N'\\172.31.16.160\f$\Backup\Log_Backup\DMAT_02.trn' WITH NORECOVERY
+
+  - Repeat the above 2 step atleat 2-3 times with different file names
+
+  - Make sure that automated log backups are disabled before you start Differential backup
+
+- run the below command to join the database to AG
+
+  ALTER DATABASE DMAT SET HADR AVAILABILITY GROUP = ABMUBODPAGL01;  
+  OR
+  Right click on the database in Availablity databases and click on [Join]
+
+
+

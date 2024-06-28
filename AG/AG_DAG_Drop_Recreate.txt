@@ -1,0 +1,61 @@
+DROP AVAILABILITY GROUP [distributedag]
+
+
+CREATE AVAILABILITY GROUP [distributedag]  
+   WITH (DISTRIBUTED)   
+   AVAILABILITY GROUP ON  
+      'ag1' WITH    
+      (   
+         LISTENER_URL = 'tcp://ag1-listener.contoso.com:5022',    
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      ),   
+      'ag2' WITH    
+      (   
+         LISTENER_URL = 'tcp://ag2-listener.contoso.com:5022',   
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      );    
+GO   
+
+
+ALTER AVAILABILITY GROUP [distributedag]   
+   JOIN   
+   AVAILABILITY GROUP ON  
+      'ag1' WITH    
+      (   
+         LISTENER_URL = 'tcp://ag1-listener.contoso.com:5022',    
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      ),   
+      'ag2' WITH    
+      (   
+         LISTENER_URL = 'tcp://ag2-listener.contoso.com:5022',   
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      );    
+GO
+
+===========================================================================
+
+ALTER AVAILABILITY GROUP [DAG_PostTradeRMS]   
+   JOIN   
+   AVAILABILITY GROUP ON  
+      'AG_ABMUMPTRMSDBL01' WITH    
+      (   
+         LISTENER_URL = 'tcp://ATMUMPTRDBL01.angeltrade.com:5022',    
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      ),   
+      'SQLAGGPXPTRDB' WITH    
+      (   
+         LISTENER_URL = 'tcp://ATGPXPTRDBS01.angeltrade.com:5022',   
+         AVAILABILITY_MODE = ASYNCHRONOUS_COMMIT,   
+         FAILOVER_MODE = MANUAL,   
+         SEEDING_MODE = AUTOMATIC   
+      ); 

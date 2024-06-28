@@ -1,0 +1,38 @@
+/* 
+STEP 1 : RESTORE MASTER KEY AND CERTIFICATE - COPIED FROM 10.253.33.160 (172.31.16.94 FOLDER)
+*/
+
+USE [master];
+-- For Restore Scenario (AG/Mirroring/LogShipping/Backup-Restore)
+create master key encryption by /* Step 1: Unique to Destination Server */
+	password = 'mkttech@ang_1.in';
+
+-- For Restore Scenario (AG/Mirroring/LogShipping/Backup-Restore)
+create certificate [ABCSODPUAT__Certificate] /* Step 2: Details similar to Source Server */
+	from file = 'C:\Sushant\TDE\ABCSODPUAT__Certificate.crt'
+	with private key (
+		file = 'C:\Sushant\TDE\ABCSODPUAT__private_key.pvk',
+		decryption by password = 'mkttech@ang_1.in'
+	);
+GO
+
+
+- Restore Full Backup - DONE
+- Restore Diff backup - DONE
+- Restore Log backup  - DONE
+- Add in AG - DONE
+- update host file from 10.253.33.189  to 10.253.33.203 and 10.253.33.204  - DONE
+- MSDTC  -- DONE
+  msdtc -uninstall
+  msdtc - install
+  set MSDTC Setting (change settings as per 10.253.33.189)
+  reboot
+
+- sp_help_revlogin
+- Link Servers
+- DB Mail
+- Operators
+- sp_configure
+- Jobs
+- Copy objects from master database (from 10.253.33.189 to 10.253.33.203 and 10.253.33.204)
+  

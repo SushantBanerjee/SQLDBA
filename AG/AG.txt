@@ -1,0 +1,11 @@
+DBCC TRACESTATUS (9567);
+GO
+
+By default, compression is not enabled for the automatic seeding streaming. We can leverage trace flag 9657 
+to enable the compression. It is essentially good for large databases. 
+You might notice an increase in the CPU of the primary replica.
+
+We can enable this trace flag either as a startup parameter or using DBCC TRACEON command. 
+Execute the following command to enable the trace flag at a global level.
+
+DBCC TRACEON (9567,-1)

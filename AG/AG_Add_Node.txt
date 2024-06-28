@@ -1,0 +1,9 @@
+- Disable existing full backup job
+- Take full backup
+- Restore full backup on New Nodes
+- Disable Log Backup
+- Shrink Log Files
+- Take Diff backup
+- Restore Diff Backup
+- Take Log backup
+- Restore Log Backup

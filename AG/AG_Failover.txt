@@ -1,0 +1,10 @@
+/*
+This need to be run on the secondary instance which should become primary
+
+*/
+
+USE master;
+GO
+
+ALTER AVAILABILITY GROUP 'youragnamehere' FAILOVER
+GO

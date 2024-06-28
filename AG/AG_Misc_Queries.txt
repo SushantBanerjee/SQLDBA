@@ -1,0 +1,7 @@
+select * from sys.dm_hadr_cluster_members	-- number of nodes in cluster for AG
+
+select * from sys.dm_hadr_cluster_members
+select * from sys.dm_hadr_availability_replica_cluster_nodes
+
+select * from sys.dm_hadr_availability_replica_cluster_states
+select * from sys.dm_hadr_availability_replica_states
